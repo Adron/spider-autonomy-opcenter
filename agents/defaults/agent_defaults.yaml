@@ -1,0 +1,36 @@
+# Agent Default Responses Configuration
+#
+# Format:
+#   <prompt_key>: <default_answer>
+#
+# When an agent encounters an interactive prompt, the prompt handler looks up
+# the prompt key here.  If a match is found the answer is used automatically;
+# otherwise the prompt is held and an operator notification is sent via the
+# dashboard API so the answer can be supplied remotely.
+#
+# Keys are free-form strings that uniquely identify a decision point in an
+# agent workflow.  Use lowercase_with_underscores for consistency.
+
+# ── Confirmation prompts ────────────────────────────────────────────────────
+confirm_overwrite: "yes"
+confirm_delete: "no"
+confirm_push: "yes"
+confirm_deploy: "no"       # Require explicit approval for deploys
+
+# ── Git / GitHub defaults ───────────────────────────────────────────────────
+git_default_branch: "main"
+git_commit_sign: "yes"
+git_push_force: "no"
+
+# ── Environment selection ───────────────────────────────────────────────────
+target_environment: "staging"
+
+# ── Retry / error handling ──────────────────────────────────────────────────
+retry_on_failure: "yes"
+max_retries: "3"
+retry_delay_seconds: "10"
+
+# ── Notification preferences ────────────────────────────────────────────────
+notify_on_completion: "yes"
+notify_on_failure: "yes"
+notify_channel: "webhook"   # webhook | slack | none

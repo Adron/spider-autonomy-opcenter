@@ -1,0 +1,37 @@
+# agent@.service — systemd template unit for agent processes.
+#
+# Each agent is identified by the instance specifier (%i), e.g.:
+#   systemctl --user enable  agent@github_sync
+#   systemctl --user start   agent@github_sync
+#   systemctl --user status  agent@github_sync
+#   journalctl --user -f -u  agent@github_sync
+#
+# Installation:
+#   cp agent@.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+
+[Unit]
+Description=Spider Autonomy Agent: %i
+Documentation=https://github.com/Adron/spider-autonomy-opcenter
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# AGENT_ID is derived from the instance specifier.
+Environment="AGENT_ID=%i"
+# Override these per-agent via a drop-in or EnvironmentFile.
+# e.g.  ~/.config/systemd/user/agent@github_sync.service.d/override.conf
+EnvironmentFile=-%h/.config/spider-autonomy/%i/env
+WorkingDirectory=%h/workspace
+ExecStart=%h/.local/bin/run_agent.sh
+Restart=on-failure
+RestartSec=10s
+# Log everything to the journal; also captured in ~/logs/<agent_id>.log by the
+# run_agent.sh script itself.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agent-%i
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Spider Autonomy OpCenter</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0f111a;
+      --surface:   #1a1e2e;
+      --border:    #2e3450;
+      --accent:    #7b93fd;
+      --green:     #4caf91;
+      --yellow:    #f0c060;
+      --red:       #e05c5c;
+      --text:      #cdd3f5;
+      --muted:     #6b7299;
+      --font:      'Segoe UI', system-ui, sans-serif;
+      --mono:      'Cascadia Code', 'Fira Code', monospace;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 1rem 2rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    header h1 { font-size: 1.25rem; color: var(--accent); }
+    header span { font-size: 0.8rem; color: var(--muted); margin-left: auto; }
+
+    main { padding: 2rem; max-width: 1400px; margin: 0 auto; }
+
+    /* ── Sections ─────────────────────────────────────────────────────── */
+    section { margin-bottom: 2.5rem; }
+    section h2 {
+      font-size: 0.9rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 1rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0.4rem;
+    }
+
+    /* ── Agent cards ──────────────────────────────────────────────────── */
+    #agent-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 1rem;
+    }
+
+    .agent-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.2rem;
+    }
+
+    .agent-card .agent-name {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--accent);
+      margin-bottom: 0.4rem;
+    }
+
+    .agent-card .meta { color: var(--muted); font-size: 0.8rem; margin-bottom: 0.8rem; }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+    .badge-running  { background: #1e3d2e; color: var(--green); }
+    .badge-paused   { background: #3d3215; color: var(--yellow); }
+    .badge-failed   { background: #3d1e1e; color: var(--red); }
+    .badge-stopped  { background: #2a2a3a; color: var(--muted); }
+
+    .card-actions { display: flex; gap: 0.5rem; margin-top: 0.8rem; flex-wrap: wrap; }
+
+    /* ── Buttons ──────────────────────────────────────────────────────── */
+    button {
+      cursor: pointer;
+      border: none;
+      border-radius: 5px;
+      padding: 4px 12px;
+      font-size: 0.8rem;
+      font-family: inherit;
+      font-weight: 500;
+      transition: opacity 0.15s;
+    }
+    button:hover { opacity: 0.8; }
+    .btn-primary   { background: var(--accent);  color: var(--bg); }
+    .btn-secondary { background: var(--border);  color: var(--text); }
+    .btn-danger    { background: var(--red);      color: #fff; }
+    .btn-success   { background: var(--green);    color: var(--bg); }
+
+    /* ── Prompt queue ─────────────────────────────────────────────────── */
+    #prompt-list { display: flex; flex-direction: column; gap: 0.75rem; }
+
+    .prompt-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+
+    .prompt-item .prompt-meta {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+      margin-bottom: 0.5rem;
+    }
+
+    .prompt-item code {
+      font-family: var(--mono);
+      font-size: 0.85rem;
+      background: var(--bg);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: var(--yellow);
+    }
+
+    .prompt-answer-row {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0.6rem;
+    }
+
+    .prompt-answer-row input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 4px 8px;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 0.85rem;
+    }
+
+    /* ── Log viewer ───────────────────────────────────────────────────── */
+    #log-controls { display: flex; gap: 0.75rem; align-items: center; margin-bottom: 0.75rem; }
+
+    #log-select {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 4px 8px;
+      color: var(--text);
+      font-family: inherit;
+    }
+
+    #log-output {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 1rem;
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      height: 320px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: #a0e0b0;
+    }
+
+    /* ── Utility ──────────────────────────────────────────────────────── */
+    .empty-state { color: var(--muted); font-style: italic; padding: 1rem 0; }
+    .refresh-note { color: var(--muted); font-size: 0.75rem; margin-left: auto; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>🕷 Spider Autonomy OpCenter</h1>
+  <span id="clock"></span>
+</header>
+
+<main>
+
+  <!-- ── Agent status ──────────────────────────────────────────────────────── -->
+  <section>
+    <h2>Agents <span class="refresh-note" id="agents-updated"></span></h2>
+    <div id="agent-grid"><p class="empty-state">Loading…</p></div>
+  </section>
+
+  <!-- ── Pending prompt queue ──────────────────────────────────────────────── -->
+  <section>
+    <h2>Pending Prompts</h2>
+    <div id="prompt-list"><p class="empty-state">No pending prompts.</p></div>
+  </section>
+
+  <!-- ── Log viewer ────────────────────────────────────────────────────────── -->
+  <section>
+    <h2>Logs</h2>
+    <div id="log-controls">
+      <select id="log-select"><option value="">— select agent —</option></select>
+      <button class="btn-secondary" onclick="fetchLogs()">Refresh</button>
+      <label style="color:var(--muted);font-size:0.8rem;">
+        <input type="checkbox" id="autoscroll" checked /> Auto-scroll
+      </label>
+    </div>
+    <div id="log-output"></div>
+  </section>
+
+</main>
+
+<script>
+/* ── Helpers ───────────────────────────────────────────────────────────────── */
+const $ = id => document.getElementById(id);
+
+async function api(path, options = {}) {
+  const res = await fetch(path, options);
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return options.raw ? res.text() : res.json();
+}
+
+function badge(status) {
+  return `<span class="badge badge-${status}">${status}</span>`;
+}
+
+function ts(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString();
+}
+
+/* ── Clock ─────────────────────────────────────────────────────────────────── */
+function updateClock() {
+  $('clock').textContent = new Date().toUTCString();
+}
+setInterval(updateClock, 1000);
+updateClock();
+
+/* ── Agents ─────────────────────────────────────────────────────────────────── */
+let agents = [];
+
+async function fetchAgents() {
+  try {
+    agents = await api('/agents');
+    renderAgents();
+    populateLogSelect();
+    $('agents-updated').textContent = 'updated ' + new Date().toLocaleTimeString();
+  } catch (e) {
+    $('agent-grid').innerHTML = `<p class="empty-state">Error: ${e.message}</p>`;
+  }
+}
+
+function renderAgents() {
+  const grid = $('agent-grid');
+  if (!agents.length) {
+    grid.innerHTML = '<p class="empty-state">No agents registered.</p>';
+    return;
+  }
+  grid.innerHTML = agents.map(a => `
+    <div class="agent-card">
+      <div class="agent-name">${a.id}</div>
+      <div class="meta">
+        user: ${a.system_user}<br>
+        heartbeat: ${ts(a.last_heartbeat)}
+      </div>
+      ${badge(a.status)}
+      <div class="card-actions">
+        <button class="btn-success"  onclick="agentAction('${a.id}','resume')">▶ Resume</button>
+        <button class="btn-secondary" onclick="agentAction('${a.id}','pause')">⏸ Pause</button>
+        <button class="btn-secondary" onclick="viewLogs('${a.id}')">📄 Logs</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function agentAction(id, action) {
+  try {
+    await api(`/agents/${id}/${action}`, { method: 'POST' });
+    await fetchAgents();
+  } catch (e) {
+    alert(`Action failed: ${e.message}`);
+  }
+}
+
+/* ── Prompts ─────────────────────────────────────────────────────────────────── */
+async function fetchPrompts() {
+  try {
+    const prompts = await api('/prompts?pending=true');
+    renderPrompts(prompts);
+  } catch (e) {
+    $('prompt-list').innerHTML = `<p class="empty-state">Error: ${e.message}</p>`;
+  }
+}
+
+function renderPrompts(prompts) {
+  const list = $('prompt-list');
+  if (!prompts.length) {
+    list.innerHTML = '<p class="empty-state">No pending prompts.</p>';
+    return;
+  }
+  list.innerHTML = prompts.map(p => `
+    <div class="prompt-item" id="prompt-${p.id}">
+      <div class="prompt-meta">
+        <strong>${p.agent_id}</strong>
+        <code>${p.prompt_key}</code>
+        <span style="color:var(--muted);font-size:0.75rem">${ts(p.created_at)}</span>
+      </div>
+      <div>${p.prompt_text}</div>
+      <div class="prompt-answer-row">
+        <input type="text" id="ans-${p.id}" placeholder="Enter answer…" />
+        <button class="btn-primary" onclick="submitAnswer(${p.id})">✓ Answer</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function submitAnswer(promptId) {
+  const input = $(`ans-${promptId}`);
+  const answer = input.value.trim();
+  if (!answer) { input.focus(); return; }
+  try {
+    await api(`/prompts/${promptId}/answer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ answer }),
+    });
+    await fetchPrompts();
+  } catch (e) {
+    alert(`Failed to submit answer: ${e.message}`);
+  }
+}
+
+/* ── Logs ────────────────────────────────────────────────────────────────────── */
+function populateLogSelect() {
+  const sel = $('log-select');
+  const current = sel.value;
+  sel.innerHTML = '<option value="">— select agent —</option>' +
+    agents.map(a => `<option value="${a.id}"${a.id===current?' selected':''}>${a.id}</option>`).join('');
+}
+
+function viewLogs(id) {
+  $('log-select').value = id;
+  fetchLogs();
+  document.querySelector('section:last-child').scrollIntoView({ behavior: 'smooth' });
+}
+
+async function fetchLogs() {
+  const id = $('log-select').value;
+  if (!id) return;
+  const out = $('log-output');
+  try {
+    const text = await api(`/agents/${id}/logs?lines=200`, { raw: true });
+    out.textContent = text || '(no log output)';
+    if ($('autoscroll').checked) out.scrollTop = out.scrollHeight;
+  } catch (e) {
+    out.textContent = `Error loading logs: ${e.message}`;
+  }
+}
+
+/* ── Polling ──────────────────────────────────────────────────────────────────── */
+async function refresh() {
+  await Promise.allSettled([fetchAgents(), fetchPrompts()]);
+}
+
+refresh();
+setInterval(refresh, 10000);   // auto-refresh every 10 s
+</script>
+
+</body>
+</html>
