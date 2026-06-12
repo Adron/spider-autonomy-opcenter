@@ -23,7 +23,7 @@ Environment="AGENT_ID=%i"
 # Override these per-agent via a drop-in or EnvironmentFile.
 # e.g.  ~/.config/systemd/user/agent@github_sync.service.d/override.conf
 EnvironmentFile=-%h/.config/spider-autonomy/%i/env
-WorkingDirectory=%h/workspace/%i
+WorkingDirectory=%h/workspace
 ExecStart=%h/.local/bin/run_agent.sh
 Restart=on-failure
 RestartSec=10s

@@ -72,7 +72,10 @@ See [docs/architecture.md](docs/architecture.md) for the full design.
 ```bash
 cd dashboard
 pip install -r requirements.txt
-flask run --host 0.0.0.0 --port 8080
+# Initialise the database (creates opcenter.db with the required tables)
+python app.py &   # starts the server and initialises DB, or run init separately:
+# python -c "from app import init_db; init_db()"
+# flask run --host 0.0.0.0 --port 8080
 ```
 
 ## Running Tests

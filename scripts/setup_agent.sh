@@ -27,15 +27,25 @@ AGENT_ID="${1:?Usage: $0 <agent_id> [github_email] [dashboard_api_url]}"
 GITHUB_EMAIL="${2:-${AGENT_ID}@agents.local}"
 DASHBOARD_API_URL="${3:-}"
 
+# Validate early: agent_id is used in Linux usernames, systemd unit names, and
+# as a filename component — restrict to characters safe for all three contexts.
+if [[ ! "$AGENT_ID" =~ ^[A-Za-z0-9_-]+$ ]]; then
+    echo "ERROR: agent_id '${AGENT_ID}' contains invalid characters." \
+         "Use [A-Za-z0-9_-] only."
+    exit 1
+fi
+
 SYSTEM_USER="agent_${AGENT_ID}"
 AGENT_HOME="/home/${SYSTEM_USER}"
 WORKSPACE="${AGENT_HOME}/workspace"
 BIN_DIR="${AGENT_HOME}/.local/bin"
 CONFIG_DIR="${AGENT_HOME}/.config/spider-autonomy/${AGENT_ID}"
-LOG_DIR="${AGENT_HOME}/logs"
+# Align with the dashboard LOG_BASE_DIR so the UI log viewer can find the file.
+LOG_BASE_DIR="${LOG_BASE_DIR:-/var/log/spider-autonomy}"
+LOG_DIR="${LOG_BASE_DIR}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 log() { echo "==> $*"; }
 warn() { echo "WARN: $*" >&2; }
@@ -56,11 +66,21 @@ fi
 
 # ── 2. Directory structure ────────────────────────────────────────────────────
 log "Creating directories"
-for dir in "$WORKSPACE" "$BIN_DIR" "$CONFIG_DIR" "$LOG_DIR" \
+for dir in "$WORKSPACE" "$BIN_DIR" "$CONFIG_DIR" \
            "${AGENT_HOME}/.config/systemd/user"; do
     mkdir -p "$dir"
     chown "$SYSTEM_USER:$SYSTEM_USER" "$dir"
 done
+
+# Create the shared log directory (owned by root) and an agent-specific log
+# file owned by the agent user so it can append without needing directory-write
+# access to LOG_DIR.
+mkdir -p "$LOG_DIR"
+LOG_FILE="${LOG_DIR}/${AGENT_ID}.log"
+if [[ ! -f "$LOG_FILE" ]]; then
+    touch "$LOG_FILE"
+fi
+chown "$SYSTEM_USER:$SYSTEM_USER" "$LOG_FILE"
 
 # ── 3. Generate SSH key ───────────────────────────────────────────────────────
 SSH_DIR="${AGENT_HOME}/.ssh"

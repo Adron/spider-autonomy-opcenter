@@ -77,6 +77,12 @@ dashboard)
     TUNNEL_PID=$!
     sleep 1  # give the tunnel a moment to establish
 
+    # Verify the tunnel process is still running; fail fast if it already died.
+    if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
+        echo "ERROR: SSH tunnel failed to start. Check your key, host, and port."
+        exit 1
+    fi
+
     URL="http://localhost:${LOCAL_PORT}"
     echo "Dashboard available at: ${URL}"
     # Try to open browser cross-platform.

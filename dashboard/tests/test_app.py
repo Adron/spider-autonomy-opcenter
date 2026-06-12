@@ -229,6 +229,115 @@ def test_events_created_on_prompt(client):
     assert any(e["event_type"] == "prompt" for e in events)
 
 
+# ── Pause / Resume ────────────────────────────────────────────────────────────
+
+
+def test_pause_agent(client, monkeypatch):
+    _register_agent(client)
+
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        import subprocess as _sp
+        result = _sp.CompletedProcess(cmd, 0, stdout="", stderr="")
+        return result
+
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    # pwd.getpwnam must return a valid entry so _systemctl can resolve the UID.
+    import pwd
+    monkeypatch.setattr(pwd, "getpwnam", lambda name: type("pw", (), {"pw_uid": 1001})())
+
+    res = client.post("/agents/test_agent/pause")
+    assert res.status_code == 200
+    assert res.get_json()["status"] == "paused"
+    # systemctl should have been called with 'stop'
+    assert any("stop" in cmd for cmd in calls)
+    # Agent status in DB should be paused
+    agent = client.get("/agents/test_agent").get_json()
+    assert agent["status"] == "paused"
+
+
+def test_resume_agent(client, monkeypatch):
+    _register_agent(client)
+
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        import subprocess as _sp
+        return _sp.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    import pwd
+    monkeypatch.setattr(pwd, "getpwnam", lambda name: type("pw", (), {"pw_uid": 1001})())
+
+    res = client.post("/agents/test_agent/resume")
+    assert res.status_code == 200
+    assert res.get_json()["status"] == "running"
+    assert any("start" in cmd for cmd in calls)
+
+
+def test_pause_agent_not_found(client):
+    res = client.post("/agents/ghost/pause")
+    assert res.status_code == 404
+
+
+def test_resume_agent_not_found(client):
+    res = client.post("/agents/ghost/resume")
+    assert res.status_code == 404
+
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+
+
+def test_tail_logs(client, tmp_path, monkeypatch):
+    import app as app_module
+
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    log_file = log_dir / "test_agent.log"
+    log_file.write_text("line1\nline2\nline3\n")
+
+    monkeypatch.setattr(app_module, "LOG_BASE_DIR", str(log_dir))
+
+    # Register agent; log_file is computed server-side from LOG_BASE_DIR.
+    _register_agent(client)
+
+    # Monkey-patch the stored log path to point at our temp file.
+    from app import db, Agent
+    with flask_app.app_context():
+        agent = db.session.get(Agent, "test_agent")
+        agent.log_file = str(log_file)
+        db.session.commit()
+
+    import subprocess as _sp
+
+    def fake_run(cmd, **kwargs):
+        return _sp.CompletedProcess(cmd, 0, stdout="line2\nline3\n", stderr="")
+
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    res = client.get("/agents/test_agent/logs?lines=2")
+    assert res.status_code == 200
+    assert b"line" in res.data
+
+
+def test_tail_logs_no_log_file(client):
+    _register_agent(client)
+    res = client.get("/agents/test_agent/logs")
+    # log_file points to a non-existent path → 404
+    assert res.status_code == 404
+
+
+def test_tail_logs_agent_not_found(client):
+    res = client.get("/agents/ghost/logs")
+    assert res.status_code == 404
+
+
 # ── Index page ────────────────────────────────────────────────────────────────
 
 

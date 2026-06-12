@@ -24,14 +24,13 @@ _log() { echo "[prompt_handler] $(date -u +%Y-%m-%dT%H:%M:%SZ) $*" >&2; }
 
 # Read a value from the YAML defaults file for a given key.
 # YAML parsing is intentionally kept simple: lines of the form "key: value".
+# awk is used so the key is treated as a literal string (not a regex).
 _lookup_default() {
     local key="$1"
     if [[ -f "$AGENT_DEFAULTS_FILE" ]]; then
-        grep -E "^${key}:[[:space:]]" "$AGENT_DEFAULTS_FILE" \
-            | head -1 \
-            | sed 's/^[^:]*:[[:space:]]*//' \
-            | tr -d '"' \
-            | tr -d "'"
+        awk -F': ' -v k="$key" \
+            'NR==1{gsub(/^\xef\xbb\xbf/,"")} $1==k{gsub(/^[[:space:]]+|[[:space:]]+$/,"",$2); gsub(/^["'"'"']|["'"'"']$/,"",$2); print $2; exit}' \
+            "$AGENT_DEFAULTS_FILE"
     fi
 }
 
@@ -39,15 +38,22 @@ _lookup_default() {
 # time. If the key already exists the existing line is replaced.
 _save_default() {
     local key="$1" value="$2"
-    if [[ -f "$AGENT_DEFAULTS_FILE" ]] && grep -qE "^${key}:" "$AGENT_DEFAULTS_FILE"; then
-        sed -i "s|^${key}:.*|${key}: ${value}|" "$AGENT_DEFAULTS_FILE"
+    if [[ -f "$AGENT_DEFAULTS_FILE" ]] && \
+       awk -F': ' -v k="$key" '$1==k{found=1; exit} END{exit !found}' \
+           "$AGENT_DEFAULTS_FILE"; then
+        # Replace the existing line using awk so key and value are literal.
+        awk -F': ' -v k="$key" -v v="$value" \
+            'BEGIN{OFS=": "} $1==k{$1=k; $2=v; print; next} {print}' \
+            "$AGENT_DEFAULTS_FILE" > "${AGENT_DEFAULTS_FILE}.tmp" \
+            && mv "${AGENT_DEFAULTS_FILE}.tmp" "$AGENT_DEFAULTS_FILE"
     else
         echo "${key}: ${value}" >> "$AGENT_DEFAULTS_FILE"
     fi
 }
 
 # Notify the dashboard that an agent is waiting for a prompt answer.
-# Returns the answer provided via the API, or an empty string on failure.
+# Creates a pending prompt, then polls GET /prompts/<id> until the operator
+# supplies an answer.  Returns the answer, or an empty string on failure.
 _notify_dashboard() {
     local agent_id="$1" prompt_key="$2" prompt_text="$3"
 
@@ -59,13 +65,34 @@ _notify_dashboard() {
     payload=$(printf '{"agent_id":"%s","prompt_key":"%s","prompt_text":"%s"}' \
         "$agent_id" "$prompt_key" "$prompt_text")
 
-    local response
-    response=$(curl -s -X POST \
+    # Create the pending prompt; extract the new prompt's id.
+    local create_response prompt_id
+    create_response=$(curl -s -X POST \
         -H "Content-Type: application/json" \
         -d "$payload" \
         "${DASHBOARD_API_URL}/prompts" 2>/dev/null) || true
 
-    echo "$response" | grep -oP '"answer"\s*:\s*"\K[^"]+' || true
+    prompt_id=$(echo "$create_response" | grep -oP '"id"\s*:\s*\K[0-9]+' || true)
+    if [[ -z "$prompt_id" ]]; then
+        _log "Could not create dashboard prompt (no id in response)"
+        return 0
+    fi
+
+    _log "Waiting for operator answer to prompt id=${prompt_id} key='${prompt_key}'"
+
+    # Poll until awaiting_input is false, then return the answer.
+    local poll_interval=5
+    while true; do
+        sleep "$poll_interval"
+        local poll_response awaiting
+        poll_response=$(curl -s \
+            "${DASHBOARD_API_URL}/prompts/${prompt_id}" 2>/dev/null) || true
+        awaiting=$(echo "$poll_response" | grep -oP '"awaiting_input"\s*:\s*\K(true|false)' || true)
+        if [[ "$awaiting" == "false" ]]; then
+            echo "$poll_response" | grep -oP '"answer"\s*:\s*"\K[^"]+' || true
+            return 0
+        fi
+    done
 }
 
 # ── Public API ───────────────────────────────────────────────────────────────

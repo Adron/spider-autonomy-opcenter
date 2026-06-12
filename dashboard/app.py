@@ -10,6 +10,12 @@ A lightweight Flask REST API + minimal web UI that provides:
 
 Usage:
   pip install -r requirements.txt
+  # Initialise the database before first run:
+  python app.py --init-db
+  # Or start directly (also initialises the DB):
+  python app.py
+  # To use flask run, initialise the DB first then start the server:
+  DATABASE_URL=sqlite:///opcenter.db python -c "from app import init_db; init_db()"
   DATABASE_URL=sqlite:///opcenter.db flask run --host 0.0.0.0 --port 8080
 
 Environment variables:
@@ -207,11 +213,11 @@ def heartbeat(agent_id):
 
 @app.route("/agents/<agent_id>/pause", methods=["POST"])
 def pause_agent(agent_id):
-    """Send SIGSTOP to the agent's systemd service (pauses execution)."""
+    """Stop the agent's systemd service (halts execution until resumed)."""
     agent = db.session.get(Agent, agent_id)
     if agent is None:
         abort(404)
-    _systemctl("stop", agent_id)
+    _systemctl("stop", agent_id, agent.system_user)
     agent.status = "paused"
     _record_event(agent_id, "status_change", '{"new_status":"paused"}')
     db.session.commit()
@@ -224,7 +230,7 @@ def resume_agent(agent_id):
     agent = db.session.get(Agent, agent_id)
     if agent is None:
         abort(404)
-    _systemctl("start", agent_id)
+    _systemctl("start", agent_id, agent.system_user)
     agent.status = "running"
     _record_event(agent_id, "status_change", '{"new_status":"running"}')
     db.session.commit()
@@ -255,14 +261,20 @@ def tail_logs(agent_id):
         abort(403, description="Log path is outside the permitted directory")
 
     lines = request.args.get("lines", 100, type=int)
+    # Clamp to a sane range so callers cannot request negative or huge reads.
+    lines = max(1, min(lines, 10_000))
 
     if not os.path.isfile(resolved):
         abort(404, description="Log file not found")
 
     def _generate():
-        with open(resolved, "r", encoding="utf-8", errors="replace") as fh:
-            all_lines = fh.readlines()
-        yield from all_lines[-lines:]
+        result = subprocess.run(
+            ["tail", "-n", str(lines), resolved],
+            capture_output=True,
+            text=True,
+            errors="replace",
+        )
+        yield result.stdout
 
     return Response(_generate(), mimetype="text/plain")
 
@@ -301,7 +313,9 @@ def create_prompt():
         prompt_text=data["prompt_text"],
     )
     db.session.add(prompt)
-    _record_event(data["agent_id"], "prompt", f'{{"prompt_key":"{data["prompt_key"]}"}}')
+    import json as _json
+    _record_event(data["agent_id"], "prompt",
+                  _json.dumps({"prompt_key": data["prompt_key"]}))
     db.session.commit()
     return jsonify(prompt.to_dict()), 201
 
@@ -370,11 +384,27 @@ def _safe_agent_id(agent_id: str) -> str:
     return agent_id
 
 
-def _systemctl(action: str, agent_id: str) -> None:
-    """Run a systemctl --user command for the named agent service."""
+def _systemctl(action: str, agent_id: str, system_user: str) -> None:
+    """Run a systemctl --user command for the named agent service.
+
+    Each agent runs as its own Linux user, so the command is executed via
+    ``sudo -u <system_user>`` with the correct XDG_RUNTIME_DIR so that
+    systemd's user instance for that account is targeted.
+    """
+    import pwd as _pwd
     service = f"agent@{agent_id}"
+    try:
+        uid = _pwd.getpwnam(system_user).pw_uid
+    except KeyError:
+        app.logger.warning("System user %s not found; cannot run systemctl", system_user)
+        return
+    xdg_runtime_dir = f"/run/user/{uid}"
     result = subprocess.run(
-        ["systemctl", "--user", action, service],
+        [
+            "sudo", "-u", system_user,
+            "env", f"XDG_RUNTIME_DIR={xdg_runtime_dir}",
+            "systemctl", "--user", action, service,
+        ],
         capture_output=True,
         text=True,
     )
