@@ -167,14 +167,24 @@ def register_agent():
     if not required.issubset(data.keys()):
         abort(400, description=f"Missing required fields: {required - data.keys()}")
 
-    if db.session.get(Agent, data["id"]):
-        abort(409, description=f"Agent '{data['id']}' already registered")
+    agent_id = data["id"]
+
+    # Validate the agent_id so it is safe as a filename component.
+    if not _SAFE_ID_PATTERN.match(agent_id):
+        abort(400, description="agent id contains invalid characters (use [A-Za-z0-9_-] only)")
+
+    if db.session.get(Agent, agent_id):
+        abort(409, description=f"Agent '{agent_id}' already registered")
+
+    # Compute the log file path server-side so that no user-supplied path value
+    # ever reaches filesystem operations in tail_logs.
+    log_file = os.path.join(os.path.realpath(LOG_BASE_DIR), f"{agent_id}.log")
 
     agent = Agent(
-        id=data["id"],
+        id=agent_id,
         system_user=data["system_user"],
         status=data.get("status", "stopped"),
-        log_file=data.get("log_file"),
+        log_file=log_file,
         workdir=data.get("workdir"),
     )
     db.session.add(agent)
@@ -223,18 +233,34 @@ def resume_agent(agent_id):
 
 @app.route("/agents/<agent_id>/logs", methods=["GET"])
 def tail_logs(agent_id):
-    """Stream the last N lines from the agent's log file."""
+    """Stream the last N lines from the agent's log file.
+
+    The log file path is read from the database record (set server-side at
+    registration time) rather than being derived from the URL parameter.
+    This ensures no user-controlled data flows to filesystem operations.
+    """
     agent = db.session.get(Agent, agent_id)
     if agent is None:
         abort(404)
-    lines = request.args.get("lines", 100, type=int)
-    log_path = agent.log_file or os.path.join(LOG_BASE_DIR, f"{agent_id}.log")
 
-    if not os.path.isfile(log_path):
-        abort(404, description=f"Log file not found: {log_path}")
+    # Use the pre-stored log_file path (set server-side in register_agent).
+    # Apply realpath + prefix check as a defence-in-depth measure.
+    stored_path = agent.log_file
+    if not stored_path:
+        abort(404, description="No log file registered for this agent")
+
+    log_base = os.path.realpath(LOG_BASE_DIR)
+    resolved = os.path.realpath(stored_path)
+    if not (resolved.startswith(log_base + os.sep) or resolved == log_base):
+        abort(403, description="Log path is outside the permitted directory")
+
+    lines = request.args.get("lines", 100, type=int)
+
+    if not os.path.isfile(resolved):
+        abort(404, description="Log file not found")
 
     def _generate():
-        with open(log_path, "r", encoding="utf-8", errors="replace") as fh:
+        with open(resolved, "r", encoding="utf-8", errors="replace") as fh:
             all_lines = fh.readlines()
         yield from all_lines[-lines:]
 
@@ -327,6 +353,21 @@ def list_events(agent_id):
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+import re as _re
+
+_SAFE_ID_PATTERN = _re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _safe_agent_id(agent_id: str) -> str:
+    """Return agent_id if it contains only safe characters, else abort(400).
+
+    Ensures the value can be used as a filename component without risk of
+    path traversal (e.g. ``../etc/passwd``).
+    """
+    if not _SAFE_ID_PATTERN.match(agent_id):
+        abort(400, description="agent_id contains invalid characters")
+    return agent_id
 
 
 def _systemctl(action: str, agent_id: str) -> None:
